@@ -1,5 +1,6 @@
 import type { Metadata } from "next"
 import { Geist, Geist_Mono } from "next/font/google"
+import { FlaskConical } from "lucide-react"
 
 import "./globals.css"
 
@@ -31,6 +32,17 @@ export default function RootLayout({
       <body
         className={`${geistSans.className} min-h-dvh font-sans antialiased text-slate-900`}
       >
+        <div
+          className="pointer-events-none fixed top-4 right-4 z-[60] flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/[0.12] px-3 py-1.5 font-sans text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-700 shadow-sm backdrop-blur-sm md:top-5 md:right-6"
+          aria-label="Versión beta"
+        >
+          <FlaskConical
+            className="size-3.5 shrink-0 text-emerald-600"
+            strokeWidth={2.25}
+            aria-hidden
+          />
+          <span>Beta</span>
+        </div>
         <div className="relative min-h-dvh w-full font-sans">
           <div
             className="absolute inset-0 z-0"
