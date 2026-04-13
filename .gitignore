@@ -7,7 +7,6 @@ Core/vocational_frontend_core/
 **/env/
 **/__pycache__/
 **/*.py[cod]
-**/*.joblib
 **/*.pkl
 **/data/
 
