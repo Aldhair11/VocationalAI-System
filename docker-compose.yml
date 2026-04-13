@@ -1,0 +1,62 @@
+# Orquestación local: PostgreSQL + API Spring Boot + IA (FastAPI) + Next.js
+# Uso: copia .env.example a .env en esta carpeta y define GEMINI_API_KEY.
+# Coloca vocational_model.joblib (y opcionalmente scaler.joblib) en IA/vocational-ai-service/app/models/ antes del build de la IA.
+
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: vocational
+      POSTGRES_PASSWORD: vocational_dev
+      POSTGRES_DB: vocational
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vocational -d vocational"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  vocational-ai:
+    build:
+      context: ./IA/vocational-ai-service
+    ports:
+      - "10000:10000"
+    environment:
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+
+  vocational-api:
+    build:
+      context: ./API/vocational-backend-api
+    ports:
+      - "8080:8080"
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/vocational
+      DB_USER: vocational
+      DB_PASSWORD: vocational_dev
+      PYTHON_API_URL: http://vocational-ai:10000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      vocational-ai:
+        condition: service_started
+
+  vocational-web:
+    build:
+      context: ./Core/vocational-web-frontend
+      args:
+        NEXT_PUBLIC_VOCATIONAL_API_URL: http://localhost:8080
+    ports:
+      - "3000:3000"
+    environment:
+      VOCATIONAL_API_URL: http://vocational-api:8080/api/v1/assessments
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_VISION_MODEL: ${GEMINI_VISION_MODEL:-gemini-2.5-flash}
+    depends_on:
+      vocational-api:
+        condition: service_started
+
+volumes:
+  pgdata:

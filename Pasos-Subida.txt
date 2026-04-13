@@ -1,0 +1,56 @@
+===========================================================================
+      GUÍA DE TRABAJO PARA EL REPOSITORIO - VACATIONAL SYSTEM
+===========================================================================
+
+¡Hola equipo! Para que no borremos el trabajo de otros y el repositorio 
+se mantenga limpio, seguiremos estas reglas OBLIGATORIAS:
+
+1. LA RAMA 'MAIN' ES SAGRADA
+   - No subir cambios directamente a la rama 'main'.
+   - Todo se sube mediante ramas personales y "Pull Requests".
+
+2. NUNCA SUBIR ARCHIVOS PESADOS O CONFIGURACIONES
+   - El archivo .gitignore ya está configurado.
+   - NO SUBIR: carpetas 'venv', 'node_modules', 'target', ni archivos '.env'.
+   - Si creas una carpeta nueva con librerías, asegúrate de que no se suban.
+
+---------------------------------------------------------------------------
+PASOS PARA SUBIR TUS CAMBIOS (FLUJO DE TRABAJO)
+---------------------------------------------------------------------------
+
+PASO 1: Antes de empezar, asegúrate de tener lo último del jefe:
+   git checkout main
+   git pull origin main
+
+PASO 2: Crea tu propia rama para trabajar (ponle un nombre claro):
+   git checkout -b nombre-de-tu-rama
+   (Ejemplo: git checkout -b feat/api-python-ia)
+
+PASO 3: Haz tus cambios en el código y guárdalos localmente:
+   git add .
+   git commit -m "Explica brevemente qué cambiaste"
+
+PASO 4: Sube tu rama a GitHub:
+   git push origin nombre-de-tu-rama
+
+PASO 5: PROCESO DE PULL REQUEST (MANUAL)
+   1. Entra a la página del repositorio en GitHub.
+   2. Haz clic en la pestaña "Pull requests" (en el menú superior).
+   3. Haz clic en el botón verde "New pull request".
+   4. En el selector de la derecha (BASE),  ELIGE LA RAMA MAIN.
+   4. En el selector de la derecha (compare), BUSCA Y ELIGE tu rama CREADA.
+   5. Revisa que abajo diga "Able to merge" y que se vean tus cambios.
+   6. Haz clic en "Create pull request".
+   7. Ponle un título claro, una descripción de lo que hiciste y dale a enviar.
+   8. AHORA ESPERA a que el administrador revise y autorice el Merge.
+
+---------------------------------------------------------------------------
+ESTRUCTURA DEL PROYECTO
+---------------------------------------------------------------------------
+> vocational-data-pipeline  -> (Machine Learning - Generacion de DATA)
+> vocational-backend-api    -> (Backend con Spring Boot)
+> vocational-web-frontend   -> (Frontend con Next.js)
+> vocational-ai-service  -> (Microservicio de IA con Python)
+
+Si tienes dudas, pregunta antes de hacer un push.
+===========================================================================

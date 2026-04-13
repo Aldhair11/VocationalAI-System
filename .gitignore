@@ -1,0 +1,35 @@
+# No subir la carpeta del proyecto Flutter
+Core/vocational_frontend_core/
+
+
+# MICROSERVICIO: IA & PYTHON (vocational-data-pipeline)
+**/venv/
+**/env/
+**/__pycache__/
+**/*.py[cod]
+**/*.joblib
+**/*.pkl
+**/data/
+
+# MICROSERVICIO: API SPRING BOOT (vocational-backend-api)
+**/target/
+**/.mvn/wrapper/maven-wrapper.jar
+**/.sts4-cache/
+**/build/
+
+# MICROSERVICIO: WEB NEXT.JS (vocational-web-frontend)
+**/node_modules/
+**/.next/
+**/out/
+**/.vercel/
+
+# SEGURIDAD Y CONFIGURACIÓN LOCAL
+# Ignorar todos los archivos de variables de entorno
+**/.env*
+**/.env.local
+
+# Configuración de Editores (VS Code, IntelliJ)
+**/.vscode/
+**/.idea/
+**/*.iml
+.DS_Store
