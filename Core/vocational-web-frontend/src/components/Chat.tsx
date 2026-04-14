@@ -8,6 +8,7 @@ import remarkGfm from "remark-gfm"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { vocationalAssessmentChatUrl } from "@/lib/vocationalApi"
 import { cn } from "@/lib/utils"
 
 export interface Message {
@@ -18,9 +19,6 @@ export interface Message {
 
 /** Marcador interno mientras se espera la respuesta del backend */
 const PENDING_AI_CONTENT = "__pending_ai__"
-
-const CHAT_API_BASE =
-  process.env.NEXT_PUBLIC_VOCATIONAL_API_URL ?? "http://127.0.0.1:8080"
 
 function newId(): string {
   return crypto.randomUUID()
@@ -187,7 +185,10 @@ export function Chat({ assessmentId, initialAiMessage, className }: ChatProps) {
     setMessages((prev) => [...prev, userMsg, pendingMsg])
     setAwaitingAi(true)
 
-    const url = `${CHAT_API_BASE}/api/v1/assessments/${assessmentId}/chat`
+    const url = vocationalAssessmentChatUrl(
+      assessmentId,
+      process.env.NEXT_PUBLIC_VOCATIONAL_API_URL
+    )
     try {
       const res = await fetch(url, {
         method: "POST",

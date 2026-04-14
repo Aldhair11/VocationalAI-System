@@ -1,12 +1,17 @@
 import { NextResponse } from "next/server"
 
-const UPSTREAM =
-  process.env.VOCATIONAL_API_URL ?? "http://127.0.0.1:8080/api/v1/assessments"
+import { vocationalAssessmentsPostUrl } from "@/lib/vocationalApi"
+
+function upstreamAssessmentsUrl(): string {
+  return vocationalAssessmentsPostUrl(
+    process.env.VOCATIONAL_API_URL ?? process.env.NEXT_PUBLIC_VOCATIONAL_API_URL
+  )
+}
 
 export async function POST(request: Request) {
   try {
     const body = await request.text()
-    const res = await fetch(UPSTREAM, {
+    const res = await fetch(upstreamAssessmentsUrl(), {
       method: "POST",
       headers: {
         "Content-Type": "application/json; charset=utf-8",
