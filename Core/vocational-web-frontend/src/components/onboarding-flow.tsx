@@ -92,6 +92,20 @@ const ASSESSMENT_URL = "/api/assessments"
 const glassCard =
   "border border-zinc-200/90 bg-white/85 shadow-sm backdrop-blur-md"
 
+const COLD_START_SECONDS = 60
+
+function isColdStartFailure(
+  res: Response | null,
+  err: unknown
+): boolean {
+  if (res && [502, 503, 504].includes(res.status)) return true
+  if (err instanceof TypeError) return true
+  const m = err instanceof Error ? err.message : String(err)
+  return /502|503|504|Bad Gateway|failed to fetch|fetch failed|NetworkError|Load failed/i.test(
+    m
+  )
+}
+
 export function OnboardingFlow() {
   const [step, setStep] = React.useState<Step>("LANDING")
   const [grades, setGrades] = React.useState<GradesMap | null>(null)
@@ -104,9 +118,18 @@ export function OnboardingFlow() {
   const [fullName, setFullName] = React.useState("Estudiante")
   const [email, setEmail] = React.useState("alumno@ejemplo.com")
   const [submitLoading, setSubmitLoading] = React.useState(false)
+  const [cooldown, setCooldown] = React.useState(0)
   const [aiMessage, setAiMessage] = React.useState("")
   const [assessmentId, setAssessmentId] = React.useState<number | null>(null)
   const fileInputRef = React.useRef<HTMLInputElement>(null)
+
+  React.useEffect(() => {
+    if (cooldown <= 0) return
+    const id = window.setInterval(() => {
+      setCooldown((c) => (c <= 1 ? 0 : c - 1))
+    }, 1000)
+    return () => window.clearInterval(id)
+  }, [cooldown > 0])
 
   React.useEffect(() => {
     if (!ocrLoading) return
@@ -189,6 +212,7 @@ export function OnboardingFlow() {
     }
     setError(null)
     setSubmitLoading(true)
+    let res: Response | null = null
     try {
       const body = {
         fullName: fullName.trim() || "Estudiante",
@@ -196,14 +220,21 @@ export function OnboardingFlow() {
         grades,
         questionnaire: qPayload,
       }
-      const res = await fetch(ASSESSMENT_URL, {
+      res = await fetch(ASSESSMENT_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json; charset=utf-8" },
         body: JSON.stringify(body),
       })
       const raw = await res.text()
       if (!res.ok) {
-        throw new Error(`HTTP ${res.status}: ${raw.slice(0, 400)}`)
+        const err = new Error(`HTTP ${res.status}: ${raw.slice(0, 400)}`)
+        if (isColdStartFailure(res, err)) {
+          setCooldown(COLD_START_SECONDS)
+          setError(null)
+        } else {
+          setError(err.message)
+        }
+        return
       }
       let mensaje = raw
       let id: number | undefined
@@ -228,7 +259,12 @@ export function OnboardingFlow() {
       setAiMessage(mensaje)
       setStep("CHAT")
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      if (isColdStartFailure(res, e)) {
+        setCooldown(COLD_START_SECONDS)
+        setError(null)
+      } else {
+        setError(e instanceof Error ? e.message : String(e))
+      }
     } finally {
       setSubmitLoading(false)
     }
@@ -421,6 +457,15 @@ export function OnboardingFlow() {
                     ))}
                   </ul>
                 </div>
+                {cooldown > 0 && (
+                  <p
+                    className="rounded-lg border border-emerald-200/90 bg-emerald-50/95 px-3 py-3 font-sans text-sm leading-relaxed text-emerald-900"
+                    role="status"
+                  >
+                    Nuestros motores de Inteligencia Artificial se están despertando
+                    🚀. Por favor, espera unos segundos para volver a intentarlo.
+                  </p>
+                )}
                 {error && (
                   <p className="rounded-lg border border-red-200 bg-red-50/90 px-3 py-2 font-sans text-sm text-red-800">
                     {error}
@@ -430,6 +475,7 @@ export function OnboardingFlow() {
                   <Button
                     variant="ghost"
                     className="font-sans"
+                    disabled={cooldown > 0}
                     onClick={() => {
                       setStep("QUESTIONNAIRE")
                       setQIndex(QUESTIONS.length - 1)
@@ -439,7 +485,7 @@ export function OnboardingFlow() {
                   </Button>
                   <Button
                     className="min-w-[200px] rounded-xl font-sans font-medium"
-                    disabled={submitLoading}
+                    disabled={submitLoading || cooldown > 0}
                     onClick={() => void submitAssessment()}
                   >
                     {submitLoading ? (
@@ -447,6 +493,8 @@ export function OnboardingFlow() {
                         <Loader2 className="mr-2 size-4 animate-spin" />
                         Enviando…
                       </>
+                    ) : cooldown > 0 ? (
+                      `Despertando IA... (${cooldown}s)`
                     ) : (
                       "Consultar orientación"
                     )}
