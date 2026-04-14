@@ -462,8 +462,7 @@ export function OnboardingFlow() {
                     className="rounded-lg border border-emerald-200/90 bg-emerald-50/95 px-3 py-3 font-sans text-sm leading-relaxed text-emerald-900"
                     role="status"
                   >
-                    Nuestros motores de Inteligencia Artificial se están despertando
-                    🚀. Por favor, espera unos segundos para volver a intentarlo.
+                    Nuestros motores de Inteligencia Artificial se están despertando. Por favor, espera unos segundos para volver a intentarlo.
                   </p>
                 )}
                 {error && (
