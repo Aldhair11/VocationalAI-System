@@ -38,7 +38,7 @@ app.include_router(prediction_router)
 
 @app.get("/")
 def read_root():
-    return {"mensaje": "El Motor de IA esta en linea y espera ordenes."}
+    return {"status": "El Motor de IA esta en linea"}
 
 
 @app.get("/health")
