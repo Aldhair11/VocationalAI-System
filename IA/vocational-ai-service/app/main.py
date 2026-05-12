@@ -36,9 +36,10 @@ app.add_middleware(
 app.include_router(prediction_router)
 
 
+@app.head("/")
 @app.get("/")
 def read_root():
-    return {"status": "El Motor de IA esta en linea"}
+    return {"status": "IA Awake and Ready"}
 
 
 @app.get("/health")
