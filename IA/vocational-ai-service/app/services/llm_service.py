@@ -5,16 +5,99 @@ Orientación vocacional con Gemini vía LangChain (langchain-google-genai).
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_google_genai import ChatGoogleGenerativeAI
+from tenacity import (
+    before_sleep_log,
+    retry,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from app.core.config import get_settings
 from app.models.schemas import ChatFollowUpRequest
 
 GEMINI_MODEL = "gemini-2.5-flash"
+
+logger = logging.getLogger(__name__)
+
+_TRANSIENT_HTTP_STATUS_CODES = frozenset({429, 503})
+
+_TRANSIENT_API_CORE_TYPES: tuple[type[BaseException], ...] = ()
+try:
+    from google.api_core.exceptions import ResourceExhausted, ServiceUnavailable
+
+    _TRANSIENT_API_CORE_TYPES = (ResourceExhausted, ServiceUnavailable)
+except ImportError:
+    pass
+
+_GenAIAPIError: type[BaseException] | None = None
+try:
+    from google.genai.errors import APIError as _GenAIAPIError
+except ImportError:
+    pass
+
+_HTTPStatusError: type[BaseException] | None = None
+try:
+    from httpx import HTTPStatusError as _HTTPStatusError
+except ImportError:
+    pass
+
+
+def _exception_http_status(exc: BaseException) -> int | None:
+    for attr in ("status_code", "code", "status"):
+        value = getattr(exc, attr, None)
+        if isinstance(value, int):
+            return value
+    return None
+
+
+def _is_transient_gemini_error(exc: BaseException) -> bool:
+    """True solo para rate-limit (429) y servicio no disponible (503)."""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+
+        if _TRANSIENT_API_CORE_TYPES and isinstance(
+            current, _TRANSIENT_API_CORE_TYPES
+        ):
+            return True
+
+        if _GenAIAPIError is not None and isinstance(current, _GenAIAPIError):
+            if current.code in _TRANSIENT_HTTP_STATUS_CODES:
+                return True
+
+        if _HTTPStatusError is not None and isinstance(current, _HTTPStatusError):
+            if current.response.status_code in _TRANSIENT_HTTP_STATUS_CODES:
+                return True
+
+        status = _exception_http_status(current)
+        if status in _TRANSIENT_HTTP_STATUS_CODES:
+            return True
+
+        cause = current.__cause__
+        context = current.__context__ if cause is None else None
+        current = cause or context
+
+    return False
+
+
+@retry(
+    retry=retry_if_exception(_is_transient_gemini_error),
+    stop=stop_after_attempt(4),
+    wait=wait_exponential(min=2, max=10),
+    before_sleep=before_sleep_log(logger, logging.WARNING),
+    reraise=True,
+)
+def _invoke_gemini(chain: Any, payload: dict[str, Any]) -> Any:
+    """Invoca la cadena LangChain contra Gemini con reintentos transitorios."""
+    return chain.invoke(payload)
 
 _MARKDOWN_FORMAT_RULES = """
 REGLAS ESTRICTAS DE FORMATO (Markdown):
@@ -86,12 +169,13 @@ def generate_mensaje_orientador(
     cuestionario_json = json.dumps(cuestionario, ensure_ascii=False, indent=2)
 
     chain = build_orientador_chain()
-    result = chain.invoke(
+    result = _invoke_gemini(
+        chain,
         {
             "macro_area": macro_area,
             "notas_json": notas_json,
             "cuestionario_json": cuestionario_json,
-        }
+        },
     )
     content = result.content
     if isinstance(content, str):
@@ -149,12 +233,13 @@ def generate_chat_followup(request: ChatFollowUpRequest) -> str:
     ]
 
     chain = build_followup_chain()
-    result = chain.invoke(
+    result = _invoke_gemini(
+        chain,
         {
             "macro_area": request.macro_area,
             "history": history_messages,
             "new_message": request.new_message,
-        }
+        },
     )
     content = result.content
     if isinstance(content, str):
