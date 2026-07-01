@@ -2,11 +2,10 @@ import { GoogleGenerativeAI } from "@google/generative-ai"
 import { NextResponse } from "next/server"
 
 import {
-  detectFileKind,
   extensionFromName,
   MAX_UPLOAD_BYTES,
   mimeFromFileKind,
-  type AllowedFileKind,
+  resolveUploadKind,
 } from "@/lib/uploadValidation"
 import {
   GRADE_KEYS,
@@ -198,38 +197,13 @@ export async function POST(request: Request) {
       )
     }
 
-    const fileKind = detectFileKind(buf)
-    if (!fileKind) {
-      return NextResponse.json(
-        {
-          error:
-            "El contenido del archivo no coincide con una imagen o PDF válido.",
-        },
-        { status: 400 }
-      )
+    const scanHeader = buf.subarray(0, Math.min(buf.length, 1024))
+    const resolved = resolveUploadKind(scanHeader, ext, declaredType)
+    if (!resolved.ok) {
+      return NextResponse.json({ error: resolved.error }, { status: 400 })
     }
 
-    const expectedKind: AllowedFileKind | null =
-      ext === ".pdf"
-        ? "pdf"
-        : ext === ".png"
-          ? "png"
-          : ext === ".webp"
-            ? "webp"
-            : ext === ".jpg" || ext === ".jpeg"
-              ? "jpeg"
-              : null
-
-    if (expectedKind && fileKind !== expectedKind) {
-      return NextResponse.json(
-        {
-          error: `La extensión del archivo (${ext}) no coincide con su contenido real.`,
-        },
-        { status: 400 }
-      )
-    }
-
-    const mimeType = mimeFromFileKind(fileKind)
+    const mimeType = mimeFromFileKind(resolved.kind)
     const base64 = buf.toString("base64")
 
     const genAI = new GoogleGenerativeAI(apiKey)

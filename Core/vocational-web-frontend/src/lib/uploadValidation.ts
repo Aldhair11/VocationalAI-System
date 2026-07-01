@@ -17,20 +17,83 @@ export const ALLOWED_MIME_TYPES = [
 
 export type AllowedFileKind = "pdf" | "png" | "jpeg" | "webp"
 
-export function extensionFromName(name: string): string {
-  const i = name.lastIndexOf(".")
-  if (i < 0) return ""
-  return name.slice(i).toLowerCase()
+/** PDF spec: la firma %PDF puede aparecer dentro de los primeros 1024 bytes. */
+const PDF_SIGNATURE_SCAN_BYTES = 1024
+
+function containsPdfSignature(header: Uint8Array): boolean {
+  const limit = Math.min(header.length, PDF_SIGNATURE_SCAN_BYTES)
+  for (let i = 0; i <= limit - 4; i++) {
+    if (
+      header[i] === 0x25 &&
+      header[i + 1] === 0x50 &&
+      header[i + 2] === 0x44 &&
+      header[i + 3] === 0x46
+    ) {
+      return true
+    }
+  }
+  return false
 }
 
-export function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+function isZipArchive(header: Uint8Array): boolean {
+  return header.length >= 2 && header[0] === 0x50 && header[1] === 0x4b
+}
+
+export function resolveUploadKind(
+  header: Uint8Array,
+  ext: string,
+  mimeType?: string
+): { ok: true; kind: AllowedFileKind } | { ok: false; error: string } {
+  const kind = detectFileKind(header)
+  if (kind) {
+    const expectedKind: AllowedFileKind | null =
+      ext === ".pdf"
+        ? "pdf"
+        : ext === ".png"
+          ? "png"
+          : ext === ".webp"
+            ? "webp"
+            : ext === ".jpg" || ext === ".jpeg"
+              ? "jpeg"
+              : null
+
+    if (expectedKind && kind !== expectedKind) {
+      return {
+        ok: false,
+        error: `La extensión del archivo (${ext}) no coincide con su contenido real.`,
+      }
+    }
+
+    return { ok: true, kind }
+  }
+
+  if (ext === ".pdf") {
+    if (isZipArchive(header)) {
+      return {
+        ok: false,
+        error:
+          "El archivo parece ser Word u Office, no un PDF. Ábrelo y guárdalo como PDF (Imprimir → Guardar como PDF).",
+      }
+    }
+
+    if (
+      !mimeType ||
+      mimeType === "application/pdf" ||
+      mimeType === "application/octet-stream"
+    ) {
+      return { ok: true, kind: "pdf" }
+    }
+  }
+
+  return {
+    ok: false,
+    error:
+      "El contenido no corresponde a una imagen o PDF válido. Verifica el archivo e intenta de nuevo.",
+  }
 }
 
 export function detectFileKind(header: Uint8Array): AllowedFileKind | null {
-  if (header.length >= 4 && header[0] === 0x25 && header[1] === 0x50 && header[2] === 0x44 && header[3] === 0x46) {
+  if (containsPdfSignature(header)) {
     return "pdf"
   }
   if (
@@ -59,6 +122,18 @@ export function detectFileKind(header: Uint8Array): AllowedFileKind | null {
     return "webp"
   }
   return null
+}
+
+export function extensionFromName(name: string): string {
+  const i = name.lastIndexOf(".")
+  if (i < 0) return ""
+  return name.slice(i).toLowerCase()
+}
+
+export function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 export function mimeFromFileKind(kind: AllowedFileKind): string {
@@ -97,9 +172,14 @@ export async function validateUploadFile(file: File): Promise<string | null> {
   const metaError = validateUploadFileMeta(file)
   if (metaError) return metaError
 
-  const header = new Uint8Array(await file.slice(0, 12).arrayBuffer())
-  if (!detectFileKind(header)) {
-    return "El contenido no corresponde a una imagen o PDF válido. Verifica el archivo e intenta de nuevo."
+  const header = new Uint8Array(
+    await file.slice(0, PDF_SIGNATURE_SCAN_BYTES).arrayBuffer()
+  )
+  const ext = extensionFromName(file.name)
+  const resolved = resolveUploadKind(header, ext, file.type || undefined)
+
+  if (!resolved.ok) {
+    return resolved.error
   }
 
   return null
