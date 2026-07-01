@@ -19,6 +19,7 @@ import { Progress } from "@/components/ui/progress"
 import { labelForGradeKey } from "@/lib/gradeLabels"
 import type { GradesMap } from "@/lib/types/grades"
 import { GRADE_KEYS } from "@/lib/types/grades"
+import { parseOcrApiResponse, validateUploadFile } from "@/lib/uploadValidation"
 import { cn } from "@/lib/utils"
 
 type Step = "LANDING" | "UPLOAD" | "QUESTIONNAIRE" | "CONFIRM" | "CHAT"
@@ -142,6 +143,14 @@ export function OnboardingFlow() {
 
   async function processFile(file: File) {
     setError(null)
+
+    const validationError = await validateUploadFile(file)
+    if (validationError) {
+      setError(validationError)
+      if (fileInputRef.current) fileInputRef.current.value = ""
+      return
+    }
+
     setOcrLoading(true)
     setProgress(0)
     try {
@@ -151,7 +160,7 @@ export function OnboardingFlow() {
         method: "POST",
         body: fd,
       })
-      const data = (await res.json()) as GradesMap & {
+      const data = (await parseOcrApiResponse(res)) as GradesMap & {
         error?: string
         detail?: unknown
       }
@@ -178,6 +187,7 @@ export function OnboardingFlow() {
     } finally {
       setOcrLoading(false)
       setProgress(0)
+      if (fileInputRef.current) fileInputRef.current.value = ""
     }
   }
 

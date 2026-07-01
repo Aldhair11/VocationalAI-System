@@ -2,6 +2,13 @@ import { GoogleGenerativeAI } from "@google/generative-ai"
 import { NextResponse } from "next/server"
 
 import {
+  detectFileKind,
+  extensionFromName,
+  MAX_UPLOAD_BYTES,
+  mimeFromFileKind,
+  type AllowedFileKind,
+} from "@/lib/uploadValidation"
+import {
   GRADE_KEYS,
   type GradesMap,
 } from "@/lib/types/grades"
@@ -9,25 +16,21 @@ import {
 const VISION_MODEL =
   process.env.GEMINI_VISION_MODEL ?? "gemini-2.5-flash"
 
-const MAX_UPLOAD_BYTES = 4 * 1024 * 1024
+const MIN_DETECTED_GRADES = 3
+const DEFAULT_GRADE = 13
 
-const EXTRACTION_PROMPT = `Eres un sistema avanzado de extracción de datos para el Ministerio de Educación del Perú. 
-Analiza este documento (libreta de notas o constancia de logros). Tu único objetivo es extraer, calcular y devolver el promedio numérico final para 8 áreas curriculares específicas, retornando UNICAMENTE un objeto JSON válido.
+const EXTRACTION_PROMPT = `Eres un sistema avanzado de extracción de datos para el Ministerio de Educación del Perú.
 
-REGLAS DE CÁLCULO Y LÓGICA:
-1. SISTEMA LITERAL A VIGESIMAL: Si las notas están en letras (AD, A, B, C), conviértelas a números ANTES de promediar usando esta escala estricta:
-   - AD (Logro Destacado) = 19
-   - A (Logro Esperado) = 16
-   - B (En Proceso) = 12
-   - C (En Inicio) = 10
-2. PERIODOS (Bimestres/Trimestres): Si la libreta es de un solo año y tiene varios periodos, busca la columna de "Promedio Final" o "Calificación Final del Área". Si no existe esa columna, calcula el promedio matemático de los periodos.
-3. AÑOS MULTIPLES O VACÍOS: Si la libreta tiene varios años (ej. 1ro a 5to), calcula el promedio matemático solo de los años que tengan notas. Ignora las columnas o años vacíos. Si solo hay un año con datos, usa ese dato directo (no hay necesidad de promediar con cero).
-4. SUB-CURSOS: Si un área se divide en sub-cursos (ej. Álgebra y Geometría), unifica sus notas y promedia para obtener la nota del área principal (Matemática).
-5. ÁREAS FALTANTES: Si no encuentras ninguna nota o referencia para una de las 8 áreas requeridas, asígnale el valor 13.
-6. FORMATO DE SALIDA: Todas las notas finales deben ser NÚMEROS ENTEROS (redondeados) entre 0 y 20.
+PASO 1 — VALIDACIÓN DEL DOCUMENTO (obligatorio):
+- Si el archivo NO es una libreta de notas, constancia de logros, boleta escolar u otro documento escolar peruano con calificaciones visibles, devuelve ÚNICAMENTE este JSON:
+  {"documentoValido": false, "motivo": "explicación breve en español para el estudiante"}
+- Ejemplos de documentos NO válidos: selfies, memes, facturas, capturas sin notas, documentos en blanco, archivos ilegibles.
+- NO inventes notas ni uses valores por defecto si el documento no es una libreta escolar.
 
-Las claves exactas del JSON que DEBES devolver son:
+PASO 2 — EXTRACCIÓN (solo si el documento SÍ es válido):
+Devuelve ÚNICAMENTE un objeto JSON con esta forma:
 {
+  "documentoValido": true,
   "notaMatematica": 0,
   "notaComunicacion": 0,
   "notaCienciaTecnologia": 0,
@@ -36,40 +39,19 @@ Las claves exactas del JSON que DEBES devolver son:
   "notaArteCultura": 0,
   "notaEducacionFisica": 0,
   "notaDesarrolloPersonal": 0
-}`
-
-const DEFAULT_GRADE = 13
-
-function extensionFromName(name: string): string {
-  const i = name.lastIndexOf(".")
-  if (i < 0) return ""
-  return name.slice(i + 1).toLowerCase()
 }
 
-const ALLOWED_MIME = new Set([
-  "image/png",
-  "image/jpeg",
-  "image/webp",
-  "application/pdf",
-])
-
-function mimeFromExtension(ext: string): string | null {
-  if (ext === "png") return "image/png"
-  if (ext === "jpg" || ext === "jpeg") return "image/jpeg"
-  if (ext === "webp") return "image/webp"
-  if (ext === "pdf") return "application/pdf"
-  return null
-}
-
-function resolveMimeType(
-  ext: string,
-  declaredType: string | undefined
-): string | null {
-  if (declaredType && ALLOWED_MIME.has(declaredType)) {
-    return declaredType
-  }
-  return mimeFromExtension(ext)
-}
+REGLAS DE CÁLCULO Y LÓGICA:
+1. SISTEMA LITERAL A VIGESIMAL: Si las notas están en letras (AD, A, B, C), conviértelas a números ANTES de promediar usando esta escala estricta:
+   - AD (Logro Destacado) = 19
+   - A (Logro Esperado) = 16
+   - B (En Proceso) = 12
+   - C (En Inicio) = 10
+2. PERIODOS (Bimestres/Trimestres): Si la libreta es de un solo año y tiene varios periodos, busca la columna de "Promedio Final" o "Calificación Final del Área". Si no existe esa columna, calcula el promedio matemático de los periodos.
+3. AÑOS MULTIPLES O VACÍOS: Si la libreta tiene varios años (ej. 1ro a 5to), calcula el promedio matemático solo de los años que tengan notas. Ignora las columnas o años vacíos.
+4. SUB-CURSOS: Si un área se divide en sub-cursos (ej. Álgebra y Geometría), unifica sus notas y promedia para obtener la nota del área principal (Matemática).
+5. ÁREAS FALTANTES: Si el documento es válido pero no encuentras una de las 8 áreas, usa null en esa clave. NO rellenes con 13 si no hay evidencia en el documento.
+6. FORMATO DE SALIDA: Todas las notas detectadas deben ser NÚMEROS ENTEROS (redondeados) entre 0 y 20.`
 
 function extractJsonFromModelText(raw: string): string {
   let t = raw.trim()
@@ -85,22 +67,65 @@ function extractJsonFromModelText(raw: string): string {
   return t.trim()
 }
 
-function normalizeGrades(parsed: Record<string, unknown>): GradesMap {
-  const out = {} as GradesMap
-  for (const key of GRADE_KEYS) {
-    const v = parsed[key]
-    let n =
-      typeof v === "number" && Number.isFinite(v)
-        ? Math.round(v)
-        : typeof v === "string"
-          ? Math.round(Number.parseFloat(v))
-          : Number.NaN
-    if (!Number.isFinite(n)) {
-      n = DEFAULT_GRADE
-    }
-    out[key] = Math.min(20, Math.max(0, n))
+function parseGradeValue(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") {
+    return null
   }
-  return out
+  const n =
+    typeof value === "number" && Number.isFinite(value)
+      ? Math.round(value)
+      : typeof value === "string"
+        ? Math.round(Number.parseFloat(value))
+        : Number.NaN
+  if (!Number.isFinite(n)) {
+    return null
+  }
+  return Math.min(20, Math.max(0, n))
+}
+
+function buildGradesFromModel(
+  parsed: Record<string, unknown>
+): { ok: true; grades: GradesMap } | { ok: false; error: string } {
+  if (parsed.documentoValido === false) {
+    const motivo =
+      typeof parsed.motivo === "string" && parsed.motivo.trim()
+        ? parsed.motivo.trim()
+        : "El archivo no parece ser una libreta o constancia de notas escolar."
+    return { ok: false, error: motivo }
+  }
+
+  const detected: Partial<GradesMap> = {}
+  let detectedCount = 0
+
+  for (const key of GRADE_KEYS) {
+    const value = parseGradeValue(parsed[key])
+    if (value !== null) {
+      detected[key] = value
+      detectedCount += 1
+    }
+  }
+
+  if (parsed.documentoValido !== true && detectedCount < MIN_DETECTED_GRADES) {
+    return {
+      ok: false,
+      error:
+        "No reconocemos una libreta de notas en este archivo. Sube una imagen o PDF legible de tu libreta o constancia de logros.",
+    }
+  }
+
+  if (detectedCount < MIN_DETECTED_GRADES) {
+    return {
+      ok: false,
+      error: `Solo se detectaron ${detectedCount} área(s) con notas. Necesitamos al menos ${MIN_DETECTED_GRADES}. Usa una libreta más legible o con más áreas visibles.`,
+    }
+  }
+
+  const grades = {} as GradesMap
+  for (const key of GRADE_KEYS) {
+    grades[key] = detected[key] ?? DEFAULT_GRADE
+  }
+
+  return { ok: true, grades }
 }
 
 export async function POST(request: Request) {
@@ -125,15 +150,33 @@ export async function POST(request: Request) {
     const name =
       file instanceof File && file.name ? file.name : "upload.bin"
     const ext = extensionFromName(name)
-    const declaredType =
-      file instanceof File && file.type ? file.type : undefined
 
-    const mimeType = resolveMimeType(ext, declaredType)
-    if (!mimeType) {
+    if (![".jpg", ".jpeg", ".png", ".webp", ".pdf"].includes(ext)) {
       return NextResponse.json(
         {
           error:
-            "Formato no soportado. Usa JPG, PNG, WebP o PDF (máx. 4 MB en este entorno).",
+            "Formato no permitido. Solo puedes subir JPG, PNG, WebP o PDF (máx. 4 MB).",
+        },
+        { status: 400 }
+      )
+    }
+
+    const declaredType =
+      file instanceof File && file.type ? file.type : undefined
+    if (
+      declaredType &&
+      declaredType !== "application/octet-stream" &&
+      ![
+        "image/png",
+        "image/jpeg",
+        "image/webp",
+        "application/pdf",
+      ].includes(declaredType)
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Tipo de archivo no permitido. Solo imagen (JPG, PNG, WebP) o PDF.",
         },
         { status: 400 }
       )
@@ -149,12 +192,44 @@ export async function POST(request: Request) {
     if (buf.length > MAX_UPLOAD_BYTES) {
       return NextResponse.json(
         {
-          error: `El archivo supera el límite de ${MAX_UPLOAD_BYTES / (1024 * 1024)} MB. Reduce el tamaño o divide el PDF.`,
+          error: `El archivo supera el límite de 4 MB. Reduce el tamaño o divide el PDF.`,
         },
         { status: 413 }
       )
     }
 
+    const fileKind = detectFileKind(buf)
+    if (!fileKind) {
+      return NextResponse.json(
+        {
+          error:
+            "El contenido del archivo no coincide con una imagen o PDF válido.",
+        },
+        { status: 400 }
+      )
+    }
+
+    const expectedKind: AllowedFileKind | null =
+      ext === ".pdf"
+        ? "pdf"
+        : ext === ".png"
+          ? "png"
+          : ext === ".webp"
+            ? "webp"
+            : ext === ".jpg" || ext === ".jpeg"
+              ? "jpeg"
+              : null
+
+    if (expectedKind && fileKind !== expectedKind) {
+      return NextResponse.json(
+        {
+          error: `La extensión del archivo (${ext}) no coincide con su contenido real.`,
+        },
+        { status: 400 }
+      )
+    }
+
+    const mimeType = mimeFromFileKind(fileKind)
     const base64 = buf.toString("base64")
 
     const genAI = new GoogleGenerativeAI(apiKey)
@@ -191,8 +266,12 @@ export async function POST(request: Request) {
       )
     }
 
-    const grades = normalizeGrades(parsed)
-    return NextResponse.json(grades)
+    const gradesResult = buildGradesFromModel(parsed)
+    if (!gradesResult.ok) {
+      return NextResponse.json({ error: gradesResult.error }, { status: 422 })
+    }
+
+    return NextResponse.json(gradesResult.grades)
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)
     return NextResponse.json({ error: message }, { status: 500 })
